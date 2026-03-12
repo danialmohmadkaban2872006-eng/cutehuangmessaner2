@@ -312,46 +312,25 @@ export async function sendMessage(
   const trimmed = content.trim()
   if (!trimmed) throw new Error('Message is empty')
 
-  if (!isAi) {
-    const { data: participant, error: participantError } = await supabase
-      .from('chat_participants')
-      .select('chat_id')
-      .eq('chat_id', chatId)
-      .eq('user_id', senderId)
-      .single()
+  const { data, error } = await supabase.rpc('send_chat_message', {
+    p_chat_id: chatId,
+    p_content: trimmed,
+    p_is_ai: isAi,
+  })
 
-    if (participantError || !participant) {
-      throw new Error('You are not a participant in this chat yet')
-    }
-  }
+  const row = Array.isArray(data) ? data[0] : data
 
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      chat_id: chatId,
-      sender_id: isAi ? null : senderId,
-      content: trimmed,
-      is_ai: isAi,
-    })
-    .select('*')
-    .single()
-
-  if (error || !data) {
+  if (error || !row) {
     throw new Error(error?.message || 'Failed to send message')
   }
 
-  await supabase
-    .from('chats')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('id', chatId)
-
   return {
-    id: data.id,
-    chatId: data.chat_id,
-    senderId: data.sender_id,
-    content: data.content,
-    createdAt: data.created_at,
-    isAi: data.is_ai,
+    id: row.id,
+    chatId: row.chat_id,
+    senderId: row.sender_id,
+    content: row.content,
+    createdAt: row.created_at,
+    isAi: row.is_ai,
   }
 }
 
