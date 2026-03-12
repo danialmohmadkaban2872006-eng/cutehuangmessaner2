@@ -2,56 +2,76 @@ import { supabase } from '@/lib/supabase'
 import { storage } from '@/lib/utils'
 import type { Chat, Message, UserProfile } from '@/types'
 
-const DEMO_MODE = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL === 'https://placeholder.supabase.co'
+const DEMO_MODE =
+  !import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.VITE_SUPABASE_URL === 'https://placeholder.supabase.co'
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function getProfileByUserId(userId: string): Promise<UserProfile | undefined> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single()
+
+  if (!data) return undefined
+
+  return {
+    id: data.id,
+    internalId: data.internal_id,
+    displayName: data.display_name,
+    avatarUrl: data.avatar_url ?? undefined,
+    bio: data.bio ?? undefined,
+    createdAt: data.created_at,
+    lastSeen: data.last_seen ?? undefined,
+  }
+}
+
+async function getChatRow(chatId: string) {
+  const { data } = await supabase
+    .from('chats')
+    .select('*')
+    .eq('id', chatId)
+    .single()
+
+  return data ?? null
+}
 
 // ─── Chat Operations ──────────────────────────────────────────────────────────
 
 export async function getUserChats(userId: string): Promise<Chat[]> {
   if (DEMO_MODE) return getDemoChats(userId)
 
-  const { data, error } = await supabase
+  const { data: participantRows, error } = await supabase
     .from('chat_participants')
-    .select(`
-      chat_id,
-      chats (
-        id, type, created_at, updated_at
-      )
-    `)
+    .select('chat_id')
     .eq('user_id', userId)
 
-  if (error || !data) return []
+  if (error || !participantRows) return []
 
   const chats: Chat[] = []
 
-  for (const row of data) {
-    const chat = row.chats as any
+  for (const row of participantRows) {
+    const chat = await getChatRow(row.chat_id)
     if (!chat) continue
 
     let otherParticipant: UserProfile | undefined
+
     if (chat.type === 'direct') {
-      const { data: participants } = await supabase
+      const { data: others } = await supabase
         .from('chat_participants')
-        .select('user_id, profiles(*)')
+        .select('user_id')
         .eq('chat_id', chat.id)
         .neq('user_id', userId)
-        .single()
 
-      if (participants) {
-        const p = (participants as any).profiles
-        if (p) {
-          otherParticipant = {
-            id: p.id,
-            internalId: p.internal_id,
-            displayName: p.display_name,
-            avatarUrl: p.avatar_url,
-            bio: p.bio,
-            createdAt: p.created_at,
-          }
-        }
+      const otherUserId = others?.[0]?.user_id
+      if (otherUserId) {
+        otherParticipant = await getProfileByUserId(otherUserId)
       }
     }
 
-    const lastMsg = await getLastMessage(chat.id)
+    const lastMessage = await getLastMessage(chat.id)
 
     chats.push({
       id: chat.id,
@@ -59,13 +79,52 @@ export async function getUserChats(userId: string): Promise<Chat[]> {
       createdAt: chat.created_at,
       updatedAt: chat.updated_at,
       otherParticipant,
-      lastMessage: lastMsg ?? undefined,
+      lastMessage: lastMessage ?? undefined,
     })
   }
 
-  return chats.sort((a, b) =>
-    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  return chats.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   )
+}
+
+export async function getChatById(
+  chatId: string,
+  currentUserId: string
+): Promise<Chat | null> {
+  if (DEMO_MODE) {
+    const chats = getDemoChats(currentUserId)
+    return chats.find((c) => c.id === chatId) ?? null
+  }
+
+  const chat = await getChatRow(chatId)
+  if (!chat) return null
+
+  let otherParticipant: UserProfile | undefined
+
+  if (chat.type === 'direct') {
+    const { data: others } = await supabase
+      .from('chat_participants')
+      .select('user_id')
+      .eq('chat_id', chat.id)
+      .neq('user_id', currentUserId)
+
+    const otherUserId = others?.[0]?.user_id
+    if (otherUserId) {
+      otherParticipant = await getProfileByUserId(otherUserId)
+    }
+  }
+
+  const lastMessage = await getLastMessage(chat.id)
+
+  return {
+    id: chat.id,
+    type: chat.type,
+    createdAt: chat.created_at,
+    updatedAt: chat.updated_at,
+    otherParticipant,
+    lastMessage: lastMessage ?? undefined,
+  }
 }
 
 export async function getOrCreateDirectChat(
@@ -74,105 +133,132 @@ export async function getOrCreateDirectChat(
 ): Promise<Chat> {
   if (DEMO_MODE) return createDemoDirectChat(userId, otherUserId)
 
-  // Check if chat already exists between these two users
-  const { data: existing } = await supabase
+  // 1) Try to find an existing direct chat shared by both users
+  const { data: myRows } = await supabase
     .from('chat_participants')
     .select('chat_id')
     .eq('user_id', userId)
 
-  if (existing) {
-    for (const row of existing) {
-      const { data: otherParticipant } = await supabase
+  if (myRows?.length) {
+    for (const row of myRows) {
+      const { data: chat } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('id', row.chat_id)
+        .eq('type', 'direct')
+        .single()
+
+      if (!chat) continue
+
+      const { data: otherRow } = await supabase
         .from('chat_participants')
         .select('user_id')
         .eq('chat_id', row.chat_id)
         .eq('user_id', otherUserId)
         .single()
 
-      if (otherParticipant) {
-        const { data: chatData } = await supabase
-          .from('chats')
-          .select('*')
-          .eq('id', row.chat_id)
-          .eq('type', 'direct')
-          .single()
-
-        if (chatData) {
-          return {
-            id: chatData.id,
-            type: 'direct',
-            createdAt: chatData.created_at,
-            updatedAt: chatData.updated_at,
-          }
+      if (otherRow) {
+        const otherParticipant = await getProfileByUserId(otherUserId)
+        return {
+          id: chat.id,
+          type: 'direct',
+          createdAt: chat.created_at,
+          updatedAt: chat.updated_at,
+          otherParticipant,
         }
       }
     }
   }
 
-  // Create new direct chat
-  const { data: newChat, error } = await supabase
+  // 2) Create a new direct chat
+  const { data: insertedChat, error: chatInsertError } = await supabase
     .from('chats')
     .insert({ type: 'direct' })
-    .select('id, type, created_at, updated_at')
+    .select('*')
     .single()
 
-  if (error || !newChat) throw new Error('Failed to create chat')
+  if (chatInsertError || !insertedChat) {
+    throw new Error(chatInsertError?.message || 'Failed to create chat')
+  }
 
-  await supabase.from('chat_participants').insert([
-    { chat_id: newChat.id, user_id: userId },
-    { chat_id: newChat.id, user_id: otherUserId },
-  ])
+  const { error: participantsError } = await supabase
+    .from('chat_participants')
+    .insert([
+      { chat_id: insertedChat.id, user_id: userId },
+      { chat_id: insertedChat.id, user_id: otherUserId },
+    ])
+
+  if (participantsError) {
+    throw new Error(participantsError.message || 'Failed to add chat participants')
+  }
+
+  const otherParticipant = await getProfileByUserId(otherUserId)
 
   return {
-    id: newChat.id,
+    id: insertedChat.id,
     type: 'direct',
-    createdAt: newChat.created_at,
-    updatedAt: newChat.updated_at,
+    createdAt: insertedChat.created_at,
+    updatedAt: insertedChat.updated_at,
+    otherParticipant,
   }
 }
 
 export async function getOrCreateAiChat(userId: string): Promise<Chat> {
   if (DEMO_MODE) return getOrCreateDemoAiChat(userId)
 
-  // Find existing AI chat for this user
-  const { data: participants } = await supabase
+  // 1) Look for an existing AI chat
+  const { data: myRows } = await supabase
     .from('chat_participants')
-    .select('chat_id, chats!inner(id, type)')
+    .select('chat_id')
     .eq('user_id', userId)
 
-  if (participants) {
-    const aiParticipant = participants.find(
-      (p) => (p.chats as any)?.type === 'ai'
-    )
-    if (aiParticipant) {
-      return {
-        id: aiParticipant.chat_id,
-        type: 'ai',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+  if (myRows?.length) {
+    for (const row of myRows) {
+      const { data: chat } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('id', row.chat_id)
+        .eq('type', 'ai')
+        .single()
+
+      if (chat) {
+        return {
+          id: chat.id,
+          type: 'ai',
+          createdAt: chat.created_at,
+          updatedAt: chat.updated_at,
+        }
       }
     }
   }
 
-  // Create new AI chat
-  const { data: newChat, error } = await supabase
+  // 2) Create a new AI chat
+  const { data: insertedChat, error: chatInsertError } = await supabase
     .from('chats')
     .insert({ type: 'ai' })
-    .select()
+    .select('*')
     .single()
 
-  if (error || !newChat) throw new Error('Failed to create AI chat')
+  if (chatInsertError || !insertedChat) {
+    throw new Error(chatInsertError?.message || 'Failed to create AI chat')
+  }
 
-  await supabase.from('chat_participants').insert({
-    chat_id: newChat.id,
-    user_id: userId,
-  })
+  const { error: participantError } = await supabase
+    .from('chat_participants')
+    .insert({
+      chat_id: insertedChat.id,
+      user_id: userId,
+    })
+
+  if (participantError) {
+    throw new Error(participantError.message || 'Failed to attach AI chat to user')
+  }
 
   return {
-    id: newChat.id,
+    id: insertedChat.id,
     type: 'ai',
-    createdAt: newChat.created_at,
-    updatedAt: newChat.updated_at,
+    createdAt: insertedChat.created_at,
+    updatedAt: insertedChat.updated_at,
   }
 }
 
@@ -183,32 +269,46 @@ export async function getChatMessages(chatId: string): Promise<Message[]> {
 
   const { data, error } = await supabase
     .from('messages')
-    .select('*, profiles:sender_id(id, internal_id, display_name, avatar_url)')
+    .select('*')
     .eq('chat_id', chatId)
     .order('created_at', { ascending: true })
 
   if (error || !data) return []
 
-  return data.map((msg) => {
-    const p = (msg as any).profiles
-    return {
-      id: msg.id,
-      chatId: msg.chat_id,
-      senderId: msg.sender_id,
-      content: msg.content,
-      createdAt: msg.created_at,
-      isAi: msg.is_ai,
-      senderProfile: p
-        ? {
-            id: p.id,
-            internalId: p.internal_id,
-            displayName: p.display_name,
-            avatarUrl: p.avatar_url,
-            createdAt: '',
-          }
-        : undefined,
+  const senderIds = Array.from(
+    new Set(data.map((m) => m.sender_id).filter(Boolean))
+  ) as string[]
+
+  const senderMap = new Map<string, UserProfile>()
+
+  if (senderIds.length) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', senderIds)
+
+    for (const p of profiles ?? []) {
+      senderMap.set(p.id, {
+        id: p.id,
+        internalId: p.internal_id,
+        displayName: p.display_name,
+        avatarUrl: p.avatar_url ?? undefined,
+        bio: p.bio ?? undefined,
+        createdAt: p.created_at,
+        lastSeen: p.last_seen ?? undefined,
+      })
     }
-  })
+  }
+
+  return data.map((msg) => ({
+    id: msg.id,
+    chatId: msg.chat_id,
+    senderId: msg.sender_id,
+    content: msg.content,
+    createdAt: msg.created_at,
+    isAi: msg.is_ai,
+    senderProfile: msg.sender_id ? senderMap.get(msg.sender_id) : undefined,
+  }))
 }
 
 export async function sendMessage(
@@ -219,20 +319,38 @@ export async function sendMessage(
 ): Promise<Message> {
   if (DEMO_MODE) return sendDemoMessage(chatId, senderId, content, isAi)
 
+  const trimmed = content.trim()
+  if (!trimmed) throw new Error('Message is empty')
+
+  // Verify the sender belongs to the chat for non-AI messages
+  if (!isAi) {
+    const { data: participant, error: participantError } = await supabase
+      .from('chat_participants')
+      .select('chat_id')
+      .eq('chat_id', chatId)
+      .eq('user_id', senderId)
+      .single()
+
+    if (participantError || !participant) {
+      throw new Error('You are not a participant in this chat yet')
+    }
+  }
+
   const { data, error } = await supabase
     .from('messages')
     .insert({
       chat_id: chatId,
       sender_id: isAi ? null : senderId,
-      content,
+      content: trimmed,
       is_ai: isAi,
     })
-    .select()
+    .select('*')
     .single()
 
-  if (error || !data) throw new Error('Failed to send message')
+  if (error || !data) {
+    throw new Error(error?.message || 'Failed to send message')
+  }
 
-  // Update chat's updated_at
   await supabase
     .from('chats')
     .update({ updated_at: new Date().toISOString() })
@@ -251,7 +369,7 @@ export async function sendMessage(
 export async function getLastMessage(chatId: string): Promise<Message | null> {
   if (DEMO_MODE) {
     const messages = getDemoMessages(chatId)
-    return messages.at(-1) ?? null
+    return messages[messages.length - 1] ?? null
   }
 
   const { data } = await supabase
@@ -314,7 +432,7 @@ export function subscribeToMessages(
 
 function getDemoChats(userId: string): Chat[] {
   const chats = storage.get<Chat[]>(`demo_chats_${userId}`) ?? []
-  // Ensure AI chat exists
+
   if (!chats.find((c) => c.type === 'ai')) {
     const aiChat: Chat = {
       id: `ai_${userId}`,
@@ -325,6 +443,7 @@ function getDemoChats(userId: string): Chat[] {
     chats.unshift(aiChat)
     storage.set(`demo_chats_${userId}`, chats)
   }
+
   return chats
 }
 
@@ -339,6 +458,7 @@ function getOrCreateDemoAiChat(userId: string): Chat {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
+
   chats.unshift(aiChat)
   storage.set(`demo_chats_${userId}`, chats)
   return aiChat
@@ -346,17 +466,20 @@ function getOrCreateDemoAiChat(userId: string): Chat {
 
 function createDemoDirectChat(userId: string, otherUserId: string): Chat {
   const chatId = `direct_${[userId, otherUserId].sort().join('_')}`
+
   const chat: Chat = {
     id: chatId,
     type: 'direct',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
+
   const chats = storage.get<Chat[]>(`demo_chats_${userId}`) ?? []
   if (!chats.find((c) => c.id === chatId)) {
     chats.push(chat)
     storage.set(`demo_chats_${userId}`, chats)
   }
+
   return chat
 }
 
@@ -378,6 +501,7 @@ function sendDemoMessage(
     createdAt: new Date().toISOString(),
     isAi,
   }
+
   const messages = getDemoMessages(chatId)
   messages.push(msg)
   storage.set(`demo_msgs_${chatId}`, messages)
