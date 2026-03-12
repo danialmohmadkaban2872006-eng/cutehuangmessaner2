@@ -37,8 +37,8 @@ export default function Input({
           className={cn(
             'input-field w-full rounded-xl px-4 py-3 text-sm',
             icon ? 'pl-10' : undefined,
-rightElement ? 'pr-12' : undefined,
-error ? 'border-rose-500 focus:border-rose-500 focus:shadow-glow-rose' : undefined,
+            rightElement ? 'pr-12' : undefined,
+            error ? 'border-rose-500 focus:border-rose-500 focus:shadow-glow-rose' : undefined,
             className
           )}
           {...props}
