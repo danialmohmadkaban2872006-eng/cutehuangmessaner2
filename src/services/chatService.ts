@@ -6,8 +6,6 @@ const DEMO_MODE =
   !import.meta.env.VITE_SUPABASE_URL ||
   import.meta.env.VITE_SUPABASE_URL === 'https://placeholder.supabase.co'
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 async function getProfileByUserId(userId: string): Promise<UserProfile | undefined> {
   const { data } = await supabase
     .from('profiles')
@@ -37,8 +35,6 @@ async function getChatRow(chatId: string) {
 
   return data ?? null
 }
-
-// ─── Chat Operations ──────────────────────────────────────────────────────────
 
 export async function getUserChats(userId: string): Promise<Chat[]> {
   if (DEMO_MODE) return getDemoChats(userId)
@@ -133,7 +129,6 @@ export async function getOrCreateDirectChat(
 ): Promise<Chat> {
   if (DEMO_MODE) return createDemoDirectChat(userId, otherUserId)
 
-  // 1) Try to find an existing direct chat shared by both users
   const { data: myRows } = await supabase
     .from('chat_participants')
     .select('chat_id')
@@ -170,7 +165,6 @@ export async function getOrCreateDirectChat(
     }
   }
 
-  // 2) Create a new direct chat
   const { data: insertedChat, error: chatInsertError } = await supabase
     .from('chats')
     .insert({ type: 'direct' })
@@ -206,7 +200,6 @@ export async function getOrCreateDirectChat(
 export async function getOrCreateAiChat(userId: string): Promise<Chat> {
   if (DEMO_MODE) return getOrCreateDemoAiChat(userId)
 
-  // 1) Look for an existing AI chat
   const { data: myRows } = await supabase
     .from('chat_participants')
     .select('chat_id')
@@ -232,7 +225,6 @@ export async function getOrCreateAiChat(userId: string): Promise<Chat> {
     }
   }
 
-  // 2) Create a new AI chat
   const { data: insertedChat, error: chatInsertError } = await supabase
     .from('chats')
     .insert({ type: 'ai' })
@@ -261,8 +253,6 @@ export async function getOrCreateAiChat(userId: string): Promise<Chat> {
     updatedAt: insertedChat.updated_at,
   }
 }
-
-// ─── Message Operations ───────────────────────────────────────────────────────
 
 export async function getChatMessages(chatId: string): Promise<Message[]> {
   if (DEMO_MODE) return getDemoMessages(chatId)
@@ -322,7 +312,6 @@ export async function sendMessage(
   const trimmed = content.trim()
   if (!trimmed) throw new Error('Message is empty')
 
-  // Verify the sender belongs to the chat for non-AI messages
   if (!isAi) {
     const { data: participant, error: participantError } = await supabase
       .from('chat_participants')
@@ -392,7 +381,6 @@ export async function getLastMessage(chatId: string): Promise<Message | null> {
   }
 }
 
-// Subscribe to new messages in real-time
 export function subscribeToMessages(
   chatId: string,
   onMessage: (msg: Message) => void
@@ -427,8 +415,6 @@ export function subscribeToMessages(
     supabase.removeChannel(channel)
   }
 }
-
-// ─── Demo Mode ────────────────────────────────────────────────────────────────
 
 function getDemoChats(userId: string): Chat[] {
   const chats = storage.get<Chat[]>(`demo_chats_${userId}`) ?? []
