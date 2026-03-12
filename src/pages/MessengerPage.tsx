@@ -4,7 +4,7 @@ import { MessageCircle } from 'lucide-react'
 import Sidebar from '@/components/messenger/Sidebar'
 import ChatWindow from '@/components/messenger/ChatWindow'
 import { useAuth } from '@/contexts/AuthContext'
-import { getChatById, getOrCreateAiChat } from '@/services/chatService'
+import { getChatById } from '@/services/chatService'
 import type { Chat } from '@/types'
 
 export default function MessengerPage() {
@@ -32,16 +32,6 @@ export default function MessengerPage() {
 
     loadActiveChat()
   }, [chatId, user])
-
-  useEffect(() => {
-    if (!chatId && user) {
-      getOrCreateAiChat(user.id)
-        .then((chat) => {
-          navigate(`/messenger/${chat.id}`, { replace: true })
-        })
-        .catch(() => {})
-    }
-  }, [chatId, user, navigate])
 
   function handleBack() {
     setActiveChat(null)
@@ -92,7 +82,7 @@ function WelcomeScreen() {
         Select a conversation
       </h2>
       <p className="text-sm max-w-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-        Choose from your conversations on the left, or start a new one by entering a User ID.
+        Choose a conversation from the sidebar or start a new one by entering a User ID.
       </p>
     </div>
   )
