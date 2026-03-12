@@ -38,6 +38,7 @@ export default function ProfilePage() {
   }
 
   async function handleCopyId() {
+    if (!user) return
     await copyToClipboard(user.internalId)
     setCopiedId(true)
     setTimeout(() => setCopiedId(false), 2000)
@@ -46,7 +47,6 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-mesh">
-      {/* Header */}
       <div className="sticky top-0 z-10 glass-subtle px-4 py-4 flex items-center gap-3">
         <button onClick={() => navigate(-1)} className="btn-ghost p-2 rounded-xl">
           <ArrowLeft className="w-5 h-5" />
@@ -67,7 +67,6 @@ export default function ProfilePage() {
       </div>
 
       <div className="max-w-lg mx-auto px-5 py-8">
-        {/* Avatar section */}
         <div className="flex flex-col items-center mb-8">
           <Avatar name={user.displayName} size="xl" className="mb-4" />
           <h2 className="font-display text-2xl font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
@@ -80,13 +79,14 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* User ID card */}
         <div className="glass-subtle rounded-2xl p-5 mb-5">
           <p className="text-xs uppercase tracking-wider font-medium mb-3" style={{ color: 'var(--text-muted)' }}>
             Your User ID
           </p>
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+          <div
+            className="flex items-center gap-3 px-4 py-3 rounded-xl"
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+          >
             <code className="flex-1 font-mono text-lg tracking-widest gradient-text font-semibold">
               {user.internalId}
             </code>
@@ -103,7 +103,6 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {/* Edit form */}
         {isEditing ? (
           <div className="glass-subtle rounded-2xl p-5 space-y-4">
             <Input
@@ -145,13 +144,14 @@ export default function ProfilePage() {
             <ProfileRow
               label="Member since"
               value={new Date(user.createdAt).toLocaleDateString('en-US', {
-                month: 'long', day: 'numeric', year: 'numeric'
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
               })}
             />
           </div>
         )}
 
-        {/* Navigate to settings */}
         <button
           onClick={() => navigate('/settings')}
           className="w-full mt-4 btn-ghost py-3 rounded-xl text-sm"
@@ -170,8 +170,10 @@ function ProfileRow({ label, value, muted }: { label: string; value: string; mut
       <p className="text-xs uppercase tracking-wider font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
         {label}
       </p>
-      <p className={`text-sm ${muted ? 'italic' : ''}`}
-        style={{ color: muted ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+      <p
+        className={`text-sm ${muted ? 'italic' : ''}`}
+        style={{ color: muted ? 'var(--text-muted)' : 'var(--text-primary)' }}
+      >
         {value}
       </p>
     </div>
